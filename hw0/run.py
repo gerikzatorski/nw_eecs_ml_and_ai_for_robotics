@@ -25,9 +25,9 @@ DS0_END = 1248298943.405
 DS1_END = 1288973229.039
 
 TIME_STEP = 0.1
-MAX_RUNTIME = 200
+MAX_RUNTIME = 500
 
-NUM_PARTICLES = 80
+NUM_PARTICLES = 100
 
 if __name__ == "__main__":
 
@@ -159,11 +159,18 @@ if __name__ == "__main__":
     data.draw_path(ax, path_dead_reckoned, color='b')
     data.draw_path(ax, gt)
 
+
+    
     timer1 = time.time()
     
     print "Program runtime = {}".format(timer1 - timer0)
 
     print "Plotting ..."
+    ax.legend(['real', 'dead reckoned', 'filtered'])
+    ax.get_legend().legendHandles[0].set_color('k')
+    ax.get_legend().legendHandles[1].set_color('b')
+    ax.get_legend().legendHandles[2].set_color('r')
+    
     plt.axis('equal')
     plt.plot()
     # plt.savefig('fig_b1.jpg')

@@ -2,7 +2,7 @@
 
 Coursework from an audited class at Northwestern.
 
-## hw0 - Filtering Algorithms
+## hw0 - Filtering Algorithms (Particle Filter)
 
 This homework used data from the Autonomous Space Robotics Lab at the University of Toronto which can be seen here: [http://asrl.utias.utoronto.ca/datasets/mrclam/index.html](http://asrl.utias.utoronto.ca/datasets/mrclam/index.html).
 
@@ -10,6 +10,7 @@ This homework used data from the Autonomous Space Robotics Lab at the University
 	
 where dataset = 0 or 1 
 
-### Some examples:
+### Examples:
 
 ![Broken Link Image](hw0/ds0_200.png)
+![Broken Link Image](hw0/ds1_500.png)
