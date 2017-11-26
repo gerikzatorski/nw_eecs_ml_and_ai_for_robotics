@@ -1,18 +1,18 @@
+import numpy as np
+import copy
+
 from math import cos, sin, acos, exp, sqrt, atan2, pi
 from scipy import stats
+
+import config
+
 from data import read_landmark_gt, read_barcodes
-import copy
-import numpy as np
-"""
-Particle Filter terminology:
-landmarks = vector of landmarks (with known position)
 
-"""
+file_prefix = "ds{}/ds{}_".format(config.DATA_SET, config.DATA_SET)
+landmarks = read_landmark_gt(file_prefix + 'Landmark_Groundtruth.dat')
+subject_lookup = read_barcodes(file_prefix + 'Barcodes.dat')
 
-landmarks = read_landmark_gt('ds0/ds0_Landmark_Groundtruth.dat')
-subject_lookup = read_barcodes('ds0/ds0_Barcodes.dat')
-
-def pf_general(Xprev, weights, ut, zt):
+def pf_general(particles, weights, ut, zt):
     """The particle filter algorithm, a variant of the Bayes filter based on importance sampling
 
     This is the algorithm in Probabilistic Robotics
@@ -23,27 +23,23 @@ def pf_general(Xprev, weights, ut, zt):
         zt: the measurement data at time t
 
     """
-    M = len(Xprev)
+    M = len(particles)
     Xt = Xtbar = []
-    for i in range(0, M-1):
-        # advance particles with control ut
-        # p.control_step(ut)
-        xt = Xprev[i].next_pose(ut)
-        # importance factor / weights
-        # w = importance_factor(zt, p.get_pose())
-        # weights[i] = compute_feature_likelihood(zt[0], xt)
+    for i in range(M):
+        xt = particles[i].next_pose(ut)
         weights[i] = importance_factor(zt, xt)
 
     normalize_weights(weights)
-    # p_weights(weights)
-    # print weights
-
     # if degeneracy is too high, resample # todo
-    tmp = copy.deepcopy(Xprev)
-    for i in range(M):
-        psample = copy.deepcopy(np.random.choice(tmp, p=weights))
-        Xt.append(psample)
-    return Xt
+    if 0.5 > 1/sum(np.square(weights)) / M:
+        # tmp = copy.deepcopy(particles)
+        tmp = np.copy(particles)
+        # tmp = particles
+        for i in range(M):
+            psample = copy.deepcopy(np.random.choice(tmp, p=weights))
+            psample = copy.deepcopy(np.random.choice(tmp, p=weights))
+            particles[i] = psample
+        normalize_weights(weights)
     
 def importance_factor(fz, phat):
     """Compute the likelihood of a measurement z
@@ -71,8 +67,8 @@ def compute_feature_likelihood(f, phat):
     Returns:
         The probability p(f | phat, M )
     """
-    sigmar = 1.
-    sigmaphi = pi / 6
+    sigmar = 0.2
+    sigmaphi = pi / 32
     landmark = landmarks.get(subject_lookup.get(f.barcode))
     mjx = landmark.x
     mjy = landmark.y

@@ -1,8 +1,17 @@
 import numpy as np
-from tools import Vector, Pose, Twist, Feature, Landmark
-
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
+
+from tools import Vector, Pose, Twist, Feature, Landmark
+
+def draw_tuple_path(axes, path, res=20, color='k'):
+    n = len(path)
+    pose_prev = path[0]
+    for i in range(0, len(path), res):
+        axes.add_line(lines.Line2D([pose_prev[0], path[i][0]],
+                                   [pose_prev[1], path[i][1]],
+                                   color=color))
+        pose_prev = path[i]
 
 def draw_path(axes, path, res=20, color='k'):
     n = len(path)
@@ -19,6 +28,7 @@ def read_gt_path(filename, tmax=None):
     for line in data:
         if tmax is not None and line[0] > tmax: break
         gt.append(Pose(line[1], line[2], line[3]))
+    gt = np.array(gt)
     return gt
 
 def read_odometry(filename, tmax=None):
@@ -30,6 +40,7 @@ def read_odometry(filename, tmax=None):
     for i, line in enumerate(data):
         if tmax is not None and line[0] > tmax: break
         q.append((line[0], Twist(x=line[1], theta=line[2])))
+    q = np.array(q)
     return q
 
 def read_measurements(filename, tmax=None):
@@ -43,6 +54,7 @@ def read_measurements(filename, tmax=None):
         if tmax is not None and line[0] > tmax: break
         if int(line[1]) in other_bots: continue
         q.append(Feature(time=line[0], barcode=int(line[1]), r=line[2], phi=line[3]))
+    # q = np.array(q)
     return q
 
 def read_landmark_gt(filename):
