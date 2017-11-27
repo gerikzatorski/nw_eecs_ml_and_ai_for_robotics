@@ -7,7 +7,7 @@ import numpy as np
 class Robot(object):
     
     def __init__(self, position=Vector(0,0), orientation=0, noisy=False, color='k'):
-        
+
         # pose
         self.position = deepcopy(position)
         self.orientation = orientation

@@ -2,9 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
 
+from matplotlib.collections import LineCollection
+
 from tools import Vector, Pose, Twist, Feature, Landmark
 
-def draw_tuple_path(axes, path, res=20, color='k'):
+def draw_tuple_path(axes, path, res=1, color='k'):
     n = len(path)
     pose_prev = path[0]
     for i in range(0, len(path), res):
@@ -12,8 +14,14 @@ def draw_tuple_path(axes, path, res=20, color='k'):
                                    [pose_prev[1], path[i][1]],
                                    color=color))
         pose_prev = path[i]
+    
+def draw_tuple_path2(axes, path, res=1, color='k'):
+    xvals = [x[0] for x in path]
+    yvals = [x[1] for x in path]
+    axes.plot(xvals, yvals, color=color)
 
-def draw_path(axes, path, res=20, color='k'):
+
+def draw_path(axes, path, res=1, color='k'):
     n = len(path)
     pose_prev = path[0]
     for i in range(0, len(path), res):

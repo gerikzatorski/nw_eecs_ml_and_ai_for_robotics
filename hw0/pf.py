@@ -8,11 +8,13 @@ import config
 
 from data import read_landmark_gt, read_barcodes
 
+from tools import particle_preview, particle_sample
+
 file_prefix = "ds{}/ds{}_".format(config.DATA_SET, config.DATA_SET)
 landmarks = read_landmark_gt(file_prefix + 'Landmark_Groundtruth.dat')
 subject_lookup = read_barcodes(file_prefix + 'Barcodes.dat')
 
-def pf_general(particles, weights, ut, zt):
+def pf_general(particles, weights, cmd, dt, zt):
     """The particle filter algorithm, a variant of the Bayes filter based on importance sampling
 
     This is the algorithm in Probabilistic Robotics
@@ -23,9 +25,8 @@ def pf_general(particles, weights, ut, zt):
         zt: the measurement data as a list of features
     """
     M = len(particles)
-    Xt = Xtbar = []
     for i in range(M):
-        xt = particles[i].next_pose(ut)
+        xt = particle_preview(particles[i], cmd, dt)
         weights[i] = importance_factor(zt, xt)
 
     normalize_weights(weights)
@@ -35,8 +36,7 @@ def pf_general(particles, weights, ut, zt):
         tmp = np.copy(particles)
         # tmp = particles
         for i in range(M):
-            psample = copy.deepcopy(np.random.choice(tmp, p=weights))
-            psample = copy.deepcopy(np.random.choice(tmp, p=weights))
+            psample = particle_sample(tmp, weights)
             particles[i] = psample
         normalize_weights(weights)
     

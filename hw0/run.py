@@ -8,7 +8,7 @@ import data
 import config
 
 from robots import Robot
-from tools import Vector, Pose
+from tools import Vector, Pose, particle_step
 from math import pi
 
 # ds0
@@ -26,11 +26,10 @@ DS1_END = 1288973229.039
 
 MAX_RUNTIME = 180
 
-NUM_PARTICLES = 20
+NUM_PARTICLES = 100
 
 if __name__ == "__main__":
 
-    timer0 = time.time()
     
     # parse arguments
     try:
@@ -69,43 +68,28 @@ if __name__ == "__main__":
     print "Number of Features = {}".format(nFeatures)
 
     # initialize some things
-    fig, ax = plt.subplots(figsize=(12, 10))
     pose0 = gt[0]
-    t_start = commandQ[0][0]
-
-    ##################################################
-    # Dead Reckoned path - loops on command events
-    ##################################################
-
-    dead_reckoned = Robot(position=pose0.position, orientation=pose0.orientation)
-    path_dead_reckoned = [dead_reckoned.get_pose()]
-
-    t_prev = 0
-    step = 0
-    for i in range(0, nCommands-1):
-        t_now = commandQ[i][0]
-        if t_now > t_end: break
-        dt = t_now - t_prev
-        dead_reckoned.control_step(dt)
-        path_dead_reckoned.append(dead_reckoned.get_pose())
-        dead_reckoned.set_command(commandQ[i][1])
-        t_prev = t_now
-        step += 1
+    x0 = pose0.position.x
+    y0 = pose0.position.y
+    theta0 = pose0.orientation
 
     ##################################################
     # Particle Filter - loops on command events
     ##################################################
 
-    particles = np.zeros((NUM_PARTICLES,), dtype=object)
-    weights = np.full((NUM_PARTICLES,), 1./NUM_PARTICLES)
-    for i in range(NUM_PARTICLES):
-        x = Robot(position=pose0.position, orientation=pose0.orientation, noisy=False)
-        particles[i] = x
+    loopt0 = time.time()
 
+    dead_reckoned = Robot(position=pose0.position, orientation=pose0.orientation)
+    path_dead_reckoned = [dead_reckoned.get_pose()]
+    
+    particles = np.full( (NUM_PARTICLES, 3) , [x0,y0,theta0] )
+    weights = np.full( (NUM_PARTICLES,) , 1. / NUM_PARTICLES )
+    
     paths = [[] for y in range(NUM_PARTICLES)] 
-    for i, p in enumerate(particles):
-        paths[i].append(p.get_pose())
+    for i, p in enumerate(particles): paths[i].append((p[0], p[1])) # todo: replace
 
+    avg_path = []
+    
     # control loop
     step = 0
     t_prev = 0
@@ -114,49 +98,59 @@ if __name__ == "__main__":
         if t_now > t_end: break
         dt = t_now - t_prev
 
-        # determine features since last loop (measurement)
+        dead_reckoned.control_step(dt)
+        path_dead_reckoned.append(dead_reckoned.get_pose())
+        dead_reckoned.set_command(commandQ[ic][1])
+
+        
+        # # determine features since last loop (measurement)
         fz = []
         while len(featureQ) > 0 and featureQ[0].time < t_now:
             fz.append(featureQ.pop(0))
 
-        # given new measurement, run particle filter
+        # # given new measurement, run particle filter
         if len(fz) > 0:
-            pf.pf_general(particles, weights, dt, fz)
-            
-        # control step + noise
+            pf.pf_general(particles, weights, commandQ[ic][1], dt, fz)
+
         for i, p in enumerate(particles):
-            p.control_step(dt)
-            p.add_noise(0.001,0.001,pi/64)
-            paths[i].append(p.get_pose())
-            p.set_command(commandQ[ic][1])
-        
+            particle_step(p, commandQ[ic][1], dt) # control step
+
+        particles = np.random.normal(particles, [0.001, 0.001, pi/64])
+
+        # update paths every so often
+        if step % 20 == 0:
+            for i, p in enumerate(particles):
+                paths[i].append((p[0], p[1]))
+            avg_path.append(np.average(particles, axis=0, weights=weights))
+
         # increment for loop
         t_prev = t_now
         step += 1
 
+    loopt1 = time.time()
+    print "Loop Runtime = {}".format(loopt1 - loopt0)
     
     ##################################################
     # Drawing
     ##################################################
 
+    print "Plotting ..."
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+
     # draw particle paths
     for i, p in enumerate(particles):
-        data.draw_path(ax, paths[i], color='c')
+        data.draw_tuple_path2(ax, paths[i], color='y')
+    data.draw_tuple_path2(ax, avg_path, color='r')
     data.draw_path(ax, path_dead_reckoned, color='b')
     data.draw_path(ax, gt)
-    
-    timer1 = time.time()
-    print "Program runtime = {}".format(timer1 - timer0)
 
-    print "Plotting ..."
-    ax.legend(['ground truth', 'dead reckoned', 'filtered'])
-    ax.get_legend().legendHandles[0].set_color('k')
-    ax.get_legend().legendHandles[1].set_color('b')
-    ax.get_legend().legendHandles[2].set_color('r')
-    
+    # ax.legend(['ground truth', 'dead reckoned', 'filtered'])
+    # ax.get_legend().legendHandles[0].set_color('k')
+    # ax.get_legend().legendHandles[1].set_color('b')
+    # ax.get_legend().legendHandles[2].set_color('r')
+
     plt.axis('equal')
     plt.plot()
     # plt.savefig('fig_b1.jpg')
     plt.show()
-
-

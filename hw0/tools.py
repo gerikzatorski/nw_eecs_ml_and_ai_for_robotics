@@ -1,3 +1,4 @@
+import numpy as np
 from math import cos, sin, atan2
 
 class Vector(object):
@@ -60,3 +61,30 @@ def angle_to_vector(theta):
 
 def vector_to_angle(V):
     return atan2(V.y, V.x)
+
+def particle_step(p, twist, dt):
+    # p is a 1x3 array (x, y, theta)
+    p[0] = p[0] + cos(p[2]) * twist.linear.x * dt
+    p[1] = p[1] + sin(p[2]) * twist.linear.x * dt
+    p[2] = p[2] + twist.angular * dt
+
+def particle_noise(p, sigmas):
+    # p = (x, y, theta)
+    # sigmas is also 1x3
+    p[0] = np.random.normal(p[0], sigmas[0])
+    p[1] = np.random.normal(p[1], sigmas[1])
+    p[2] = np.random.normal(p[2], sigmas[2])
+
+def particle_preview(p, twist, dt):
+    return Pose(p[0] + cos(p[2]) * twist.linear.x * dt,
+                p[1] + sin(p[2]) * twist.linear.x * dt,
+                p[2] + twist.angular * dt)
+
+def particle_sample(particles, weights):
+    r = np.random.random_sample() * sum(weights)
+    for i, w in enumerate(weights):
+        r -= w
+        if r < 0:
+            break
+    return particles[i]
+        
