@@ -24,10 +24,9 @@ DS1_START = 1288971842.218
 DS0_END = 1248298943.405
 DS1_END = 1288973229.039
 
-TIME_STEP = 0.1
-MAX_RUNTIME = 500
+MAX_RUNTIME = 180
 
-NUM_PARTICLES = 100
+NUM_PARTICLES = 20
 
 if __name__ == "__main__":
 
@@ -82,7 +81,8 @@ if __name__ == "__main__":
     path_dead_reckoned = [dead_reckoned.get_pose()]
 
     t_prev = 0
-    for i in range(nCommands):
+    step = 0
+    for i in range(0, nCommands-1):
         t_now = commandQ[i][0]
         if t_now > t_end: break
         dt = t_now - t_prev
@@ -90,28 +90,28 @@ if __name__ == "__main__":
         path_dead_reckoned.append(dead_reckoned.get_pose())
         dead_reckoned.set_command(commandQ[i][1])
         t_prev = t_now
+        step += 1
 
     ##################################################
-    # Particle Filter - loops in constant time
+    # Particle Filter - loops on command events
     ##################################################
-        
+
     particles = np.zeros((NUM_PARTICLES,), dtype=object)
     weights = np.full((NUM_PARTICLES,), 1./NUM_PARTICLES)
     for i in range(NUM_PARTICLES):
-        x = Robot(position=pose0.position, orientation=pose0.orientation, noisy=True)
+        x = Robot(position=pose0.position, orientation=pose0.orientation, noisy=False)
         particles[i] = x
 
-    locpath = []
     paths = [[] for y in range(NUM_PARTICLES)] 
     for i, p in enumerate(particles):
         paths[i].append(p.get_pose())
-    
+
     # control loop
-    t_now = t_start
+    step = 0
     t_prev = 0
-    ic = 0
-    tmp = [[] for y in range(NUM_PARTICLES)] 
-    while t_now < t_end and ic < len(commandQ):
+    for ic in range(nCommands):
+        t_now = commandQ[ic][0]
+        if t_now > t_end: break
         dt = t_now - t_prev
 
         # determine features since last loop (measurement)
@@ -122,51 +122,34 @@ if __name__ == "__main__":
         # given new measurement, run particle filter
         if len(fz) > 0:
             pf.pf_general(particles, weights, dt, fz)
-
+            
         # control step + noise
-        for p in particles:
+        for i, p in enumerate(particles):
             p.control_step(dt)
             p.add_noise(0.001,0.001,pi/64)
-
-        # update paths
-        for i, p in enumerate(particles):
-            ptmp = p.get_pose()
             paths[i].append(p.get_pose())
-            tmp[i] = (ptmp.position.x, ptmp.position.y, ptmp.orientation)
-
-        avg = np.average(tmp, axis=0, weights=weights)
-        locpath.append(avg)
+            p.set_command(commandQ[ic][1])
         
-        # determine the latest command
-        while ic < len(commandQ) and commandQ[ic][0] < t_now:
-            ic += 1
-
-        # new commands?
-        if ic < len(commandQ):
-            for p in particles:
-                p.set_command(commandQ[ic][1])
-
-        # loop increments
+        # increment for loop
         t_prev = t_now
-        t_now += TIME_STEP
+        step += 1
+
+    
+    ##################################################
+    # Drawing
+    ##################################################
 
     # draw particle paths
-    # for i, p in enumerate(particles):
-        # data.draw_path(ax, paths[i], color='c')
-    data.draw_tuple_path(ax, locpath, color='r')
-
-    # draw dead reckoned and ground truth paths
+    for i, p in enumerate(particles):
+        data.draw_path(ax, paths[i], color='c')
     data.draw_path(ax, path_dead_reckoned, color='b')
     data.draw_path(ax, gt)
-
-
     
     timer1 = time.time()
-    
     print "Program runtime = {}".format(timer1 - timer0)
 
     print "Plotting ..."
-    ax.legend(['real', 'dead reckoned', 'filtered'])
+    ax.legend(['ground truth', 'dead reckoned', 'filtered'])
     ax.get_legend().legendHandles[0].set_color('k')
     ax.get_legend().legendHandles[1].set_color('b')
     ax.get_legend().legendHandles[2].set_color('r')

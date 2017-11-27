@@ -26,13 +26,6 @@ class Robot(object):
     def __str__(self):
         return "Robot [{}, {}]".format(self.position, self.orientation)
 
-    # def __deepcopy__(self, memo):
-    #     dpcpy = Robot(position=self.position, orientation=self.orientation, color=self.color)
-    #     dpcpy._command = copy.deepcopy(self._command)
-    #     dpcpy.velocity = copy.deepcopy(self.velocity)
-    #     dpcpy.angular_velocity = self.angular_velocity
-    #     return dpcpy
-                
     def control_step(self, dt):
         self.velocity = angle_to_vector(self.orientation) * self._command.linear.x
         self.angular_velocity = self._command.angular

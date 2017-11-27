@@ -18,10 +18,9 @@ def pf_general(particles, weights, ut, zt):
     This is the algorithm in Probabilistic Robotics
 
     Args:
-        X_prev: collection of particles in the last step
+        particles: collection of particles in the last step
         ut: the control data at time t (in this case we use step time to run fake control step)
-        zt: the measurement data at time t
-
+        zt: the measurement data as a list of features
     """
     M = len(particles)
     Xt = Xtbar = []
