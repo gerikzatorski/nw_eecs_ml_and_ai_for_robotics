@@ -8,7 +8,7 @@ import data
 import config
 
 from robots import Robot
-from tools import Vector, Pose, particle_step
+from tools import particle_step
 from math import pi
 
 # ds0
@@ -29,7 +29,6 @@ MAX_RUNTIME = 180
 NUM_PARTICLES = 100
 
 if __name__ == "__main__":
-
     
     # parse arguments
     try:
@@ -102,7 +101,6 @@ if __name__ == "__main__":
         path_dead_reckoned.append(dead_reckoned.get_pose())
         dead_reckoned.set_command(commandQ[ic][1])
 
-        
         # # determine features since last loop (measurement)
         fz = []
         while len(featureQ) > 0 and featureQ[0].time < t_now:
@@ -115,6 +113,7 @@ if __name__ == "__main__":
         for i, p in enumerate(particles):
             particle_step(p, commandQ[ic][1], dt) # control step
 
+        # add noise
         particles = np.random.normal(particles, [0.001, 0.001, pi/64])
 
         # update paths every so often
@@ -145,10 +144,10 @@ if __name__ == "__main__":
     data.draw_path(ax, path_dead_reckoned, color='b')
     data.draw_path(ax, gt)
 
-    # ax.legend(['ground truth', 'dead reckoned', 'filtered'])
-    # ax.get_legend().legendHandles[0].set_color('k')
-    # ax.get_legend().legendHandles[1].set_color('b')
-    # ax.get_legend().legendHandles[2].set_color('r')
+    ax.legend(['ground truth', 'dead reckoned', 'filtered'])
+    ax.get_legend().legendHandles[0].set_color('k')
+    ax.get_legend().legendHandles[1].set_color('b')
+    ax.get_legend().legendHandles[2].set_color('r')
 
     plt.axis('equal')
     plt.plot()

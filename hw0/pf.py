@@ -7,7 +7,6 @@ from scipy import stats
 import config
 
 from data import read_landmark_gt, read_barcodes
-
 from tools import particle_preview, particle_sample
 
 file_prefix = "ds{}/ds{}_".format(config.DATA_SET, config.DATA_SET)
@@ -30,19 +29,16 @@ def pf_general(particles, weights, cmd, dt, zt):
         weights[i] = importance_factor(zt, xt)
 
     normalize_weights(weights)
-    # if degeneracy is too high, resample # todo
+    # if degeneracy is too high, resample
     if 0.5 > 1/sum(np.square(weights)) / M:
-        # tmp = copy.deepcopy(particles)
         tmp = np.copy(particles)
-        # tmp = particles
         for i in range(M):
             psample = particle_sample(tmp, weights)
             particles[i] = psample
-        normalize_weights(weights)
+        normalize_weights(weights) # for avg path
     
 def importance_factor(fz, phat):
     """Compute the likelihood of a measurement z
-    Calculates likelihood by iterating over measurement's features.
 
     Args:
         z: the measurement
@@ -92,9 +88,3 @@ def normalize_weights(weights):
     tot = sum(weights)
     for i in range (0,len(weights)):
         weights[i] = weights[i] / tot
-
-def p_weights(weights):
-    nw = []
-    for i in range(0, len(weights)):
-        nw.append(float("{0:.4f}".format(weights[i])))
-    print nw
