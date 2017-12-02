@@ -135,31 +135,5 @@ class Twist(object):
     def __str__(self):
         return "Twist {{linear: {0!s}, angular: {1!s}}}".format(self.linear, self.angular)
 
-
-class Vector(object):
-    def __init__(self, x=0., y=0.):
-        self.x = x
-        self.y = y
-
-    def __str__(self):
-        return "Vector [{}, {}]".format(self.x, self.y)
-
-    def __rmul__(self, other):
-        return Vector(self.x*other, self.y*other)
-
-    def __mul__(self, other):
-        return Vector(self.x*other, self.y*other)
-        
-    def normalize(self):
-        l = sqrt(self.x*self.x + self.y*self.y)
-        self.x = self.x / l
-        self.y = self.y / l
-
 def dist(p1, p2):
     return sqrt(pow(p2[0] - p1[0], 2) + pow(p2[1] - p1[1], 2))
-    
-def angle_to_vector(theta):
-    return Vector(cos(theta), sin(theta))
-
-def vector_to_angle(V):
-    return atan2(V.y, V.x)

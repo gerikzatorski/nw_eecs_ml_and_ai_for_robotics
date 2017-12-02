@@ -1,68 +1,43 @@
 from math import cos, sin, pi
-from tools import Vector, Pose, Twist, angle_to_vector
 from copy import deepcopy
 
 import numpy as np
 
-class Robot(object):
+class Unicycle(object):
+    """A simple unicycle based robot
     
-    def __init__(self, position=Vector(0,0), orientation=0, noisy=False, color='k'):
+    Attributes:
+        q: state of the robot [x, y, heading] (m and rad)
+        v: robot velocities, [forward, lateral, angular] (m/s and rad/s)
+        dt: sample rate (seconds)
 
-        # pose
-        self.position = deepcopy(position)
-        self.orientation = orientation
+       _u: commanded twist
+    """
+    def __init__(self, q=[0,0,0], savehist=False):
+        self.q = q
+        self.savehist = savehist
 
-        # velocities
-        self.velocity = Vector(0,0)
-        self.angular_velocity = 0
-
-        self._command = Twist()
-
-        self.color = color
-
-        if noisy:
-            self.add_noise()
+        # velocities (vx, vy, angular vel)
+        self.v = [0,0,0]
+        
+        self._u = [0,0,0] # twist vector alternative
+        
+        self.path = []
 
     def __str__(self):
         return "Robot [{}, {}]".format(self.position, self.orientation)
 
     def control_step(self, dt):
-        self.velocity = angle_to_vector(self.orientation) * self._command.linear.x
-        self.angular_velocity = self._command.angular
+        """Apply kinematic model through a single control step
+        """
+        self.q[0] = self.q[0] + cos(self.q[2]) * self._u[0] * dt
+        self.q[1] = self.q[1] + sin(self.q[2]) * self._u[0] * dt
+        self.q[2] = self.q[2] + self._u[2] * dt
+        if self.savehist:
+            self.path.append(self.q)
 
-        # kinematic model (todo: move dead-reckoning outside of robot model)
-        self.position.x = self.position.x + (self.velocity.x * dt)
-        self.position.y = self.position.y + (self.velocity.y * dt)
-        self.orientation = self.orientation + (self.angular_velocity * dt)
-
-    def next_pose(self, dt):
-        speed = self._command.linear.x
-        velocity = angle_to_vector(self.orientation) * speed
-        angular_velocity = self._command.angular
-
-        # kinematic model (todo: move dead-reckoning outside of robot model)
-        x = self.position.x + (velocity.x * dt)
-        y = self.position.y + (velocity.y * dt)
-        orientation = self.orientation + (angular_velocity * dt)
-        return Pose(x=x, y=y, orientation=orientation)
-
-    def add_noise(self, xSigma=0.03, ySigma=0.03, thetaSigma=pi / 32):
-        self.position.x = np.random.normal(self.position.x, xSigma)
-        self.position.y = np.random.normal(self.position.y, ySigma)
-        self.orientation = np.random.normal(self.orientation, thetaSigma)
-        
     def set_command(self, twist):
-        if twist is None:
-            raise ValueError("Command may not be null.")
-        if twist.linear.y != 0.:
-            raise ValueError("Cannot move sideways.")
-        self._command = twist
+        self._u = twist
 
-    def set_position(self, position):
-        self.position = position
-
-    def set_orientation(self, orientation):
-        self.orientation = orientation
-        
     def get_pose(self):
-        return Pose(x=self.position.x, y=self.position.y, orientation=self.orientation)
+        return np.array(self.q)

@@ -1,13 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.lines as lines
 import sys
 import time
 
 import data
 import config
 
-from robots import Robot
+from robots import Unicycle
 from tools import particle_step
 from math import pi
 
@@ -25,8 +24,10 @@ DS0_END = 1248298943.405
 DS1_END = 1288973229.039
 
 MAX_RUNTIME = 180
+NUM_PARTICLES = 200
+PATH_RES = 20
 
-NUM_PARTICLES = 100
+PNOISE = [0.001, 0.001, pi/64]
 
 if __name__ == "__main__":
     
@@ -68,9 +69,9 @@ if __name__ == "__main__":
 
     # initialize some things
     pose0 = gt[0]
-    x0 = pose0.position.x
-    y0 = pose0.position.y
-    theta0 = pose0.orientation
+    x0 = gt[0][0]
+    y0 = gt[0][1]
+    theta0 = gt[0][2]
 
     ##################################################
     # Particle Filter - loops on command events
@@ -78,15 +79,18 @@ if __name__ == "__main__":
 
     loopt0 = time.time()
 
-    dead_reckoned = Robot(position=pose0.position, orientation=pose0.orientation)
+    dead_reckoned = Unicycle(q=[x0, y0, theta0])
     path_dead_reckoned = [dead_reckoned.get_pose()]
-    
+
     particles = np.full( (NUM_PARTICLES, 3) , [x0,y0,theta0] )
     weights = np.full( (NUM_PARTICLES,) , 1. / NUM_PARTICLES )
-    
-    paths = [[] for y in range(NUM_PARTICLES)] 
-    for i, p in enumerate(particles): paths[i].append((p[0], p[1])) # todo: replace
 
+    particles = np.random.normal(particles, PNOISE)
+
+    
+    # sim history for visualizations
+    paths = [[] for y in range(NUM_PARTICLES)] 
+    for i, p in enumerate(particles): paths[i].append(p)
     avg_path = []
     
     # control loop
@@ -98,7 +102,6 @@ if __name__ == "__main__":
         dt = t_now - t_prev
 
         dead_reckoned.control_step(dt)
-        path_dead_reckoned.append(dead_reckoned.get_pose())
         dead_reckoned.set_command(commandQ[ic][1])
 
         # # determine features since last loop (measurement)
@@ -106,7 +109,7 @@ if __name__ == "__main__":
         while len(featureQ) > 0 and featureQ[0].time < t_now:
             fz.append(featureQ.pop(0))
 
-        # # given new measurement, run particle filter
+        # # given any new features, run particle filter
         if len(fz) > 0:
             pf.pf_general(particles, weights, commandQ[ic][1], dt, fz)
 
@@ -114,13 +117,14 @@ if __name__ == "__main__":
             particle_step(p, commandQ[ic][1], dt) # control step
 
         # add noise
-        particles = np.random.normal(particles, [0.001, 0.001, pi/64])
+        particles = np.random.normal(particles, PNOISE)
 
         # update paths every so often
-        if step % 20 == 0:
+        if step % PATH_RES == 0:
             for i, p in enumerate(particles):
-                paths[i].append((p[0], p[1]))
+                paths[i].append(p)
             avg_path.append(np.average(particles, axis=0, weights=weights))
+            path_dead_reckoned.append(dead_reckoned.get_pose())
 
         # increment for loop
         t_prev = t_now
@@ -137,17 +141,19 @@ if __name__ == "__main__":
 
     fig, ax = plt.subplots(figsize=(12, 10))
 
-    # draw particle paths
-    for i, p in enumerate(particles):
-        data.draw_tuple_path2(ax, paths[i], color='y')
-    data.draw_tuple_path2(ax, avg_path, color='r')
-    data.draw_path(ax, path_dead_reckoned, color='b')
-    data.draw_path(ax, gt)
-
+    # draw particles
+    # for i, p in enumerate(particles):
+        # data.draw_particles(ax, paths[i], res=30, cmap=cm)
+    cm = plt.cm.cool
+    data.draw_particles(ax, paths, res=20, cmap=cm)
+    data.draw_path(ax, avg_path, color='#999999')
+    data.draw_path(ax, path_dead_reckoned, color='r')
+    data.draw_path(ax, gt, color='k')
+        
     ax.legend(['ground truth', 'dead reckoned', 'filtered'])
     ax.get_legend().legendHandles[0].set_color('k')
-    ax.get_legend().legendHandles[1].set_color('b')
-    ax.get_legend().legendHandles[2].set_color('r')
+    ax.get_legend().legendHandles[1].set_color('y')
+    ax.get_legend().legendHandles[2].set_color('#999999')
 
     plt.axis('equal')
     plt.plot()
