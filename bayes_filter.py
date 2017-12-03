@@ -2,7 +2,6 @@ import numpy as np
 import copy
 
 from math import cos, sin, acos, exp, sqrt, atan2, pi
-from scipy import stats
 
 import config
 
@@ -28,14 +27,15 @@ def pf_general(particles, weights, cmd, dt, zt):
         xt = particle_preview(particles[i], cmd, dt)
         weights[i] = importance_factor(zt, xt)
 
-    normalize_weights(weights)
+    weights = np.divide(weights, weights.sum())
     # if degeneracy is too high, resample
-    if 0.5 > 1/sum(np.square(weights)) / M:
+    if 0.5 > 1/np.square(weights).sum() / M:
         tmp = np.copy(particles)
         for i in range(M):
             psample = particle_sample(tmp, weights)
             particles[i] = psample
-        normalize_weights(weights) # for avg path
+        return True
+    return False
     
 def importance_factor(fz, phat):
     """Compute the likelihood of a measurement z
@@ -62,15 +62,15 @@ def compute_feature_likelihood(f, phat):
     Returns:
         The probability p(f | phat, M )
     """
-    sigmar = 0.2
-    sigmaphi = pi / 32
+    sigmar = 2
+    sigmaphi = pi / 100
     landmark = landmarks.get(subject_lookup.get(f.barcode))
     
     rhat = sqrt(pow(landmark[0] - phat[0], 2) + pow(landmark[1] - phat[1], 2))
     phihat = atan2(landmark[1] - phat[1], landmark[0] - phat[0]) - phat[2]
+
     dr = f.r - rhat # diff in range
     dphi = acos(cos(f.phi) * cos(phihat) + sin(f.phi) * sin(phihat)) # diff in bearing
-    # return stats.norm.pdf(0, loc=dr, scale=sigmar) * stats.norm.pdf(0, loc=dphi, scale=sigmaphi)
     return norm_pdf(dr, sigmar) * norm_pdf(dphi, sigmaphi)
 
 def norm_pdf(v, sigma):
