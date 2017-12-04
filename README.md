@@ -12,5 +12,5 @@ where dataset = 0 or 1
 
 ### Examples:
 
-![Broken Link Image](hw0/ds0_200.png)
-![Broken Link Image](hw0/ds1_500.png)
+![Broken Link Image](hw0/img/fig_ds0.png)
+![Broken Link Image](hw0/img/fig_ds1.png)

@@ -12,12 +12,12 @@ from robots import Unicycle
 from tools import particle_step
 
 NUM_PARTICLES = 200
-PATH_RATE = 20
-PARTICLE_RATE = 5
+PATH_RATE = 10
+PARTICLE_RATE = 150
 
 # PNOISE = [0.002, 0.002, pi/200]
 PNOISE = [0.1, 0.1, pi/16]
-PNOISE_less = [0.01, 0.01, pi/100]
+PNOISE_less = [0.002, 0.002, pi/100]
 
 if __name__ == "__main__":
 
@@ -157,5 +157,5 @@ if __name__ == "__main__":
 
     plt.axis('equal')
     plt.plot()
-    # plt.savefig('fig_b1.jpg')
+    # plt.savefig('img/fig_ds0.png')
     plt.show()
