@@ -26,17 +26,6 @@ def particle_step(p, twist, dt):
     p[1] = p[1] + sin(p[2]) * twist[0] * dt
     p[2] = p[2] + twist[2] * dt
 
-def particle_step_np(p, twist, dt):
-    # p is a 1x3 array (x, y, theta)
-    p = p.dot([[cos(p[2]) * twist[0], 0],[sin(p[2]) * twist[0]],[0,1]]) * dt
-
-def particle_noise(p, sigmas):
-    # p = (x, y, theta)
-    # sigmas is also 1x3
-    p[0] = np.random.normal(p[0], sigmas[0])
-    p[1] = np.random.normal(p[1], sigmas[1])
-    p[2] = np.random.normal(p[2], sigmas[2])
-
 def particle_preview(p, twist, dt):
     return [p[0] + cos(p[2]) * twist[0] * dt,
             p[1] + sin(p[2]) * twist[0] * dt,
