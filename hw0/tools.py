@@ -11,15 +11,6 @@ class Feature(object):
     def __str__(self):
         return "Feature ({}, barcode={}, x={}, y={})".format(self.time, self.barcode, self.r, self.phi)
 
-class Landmark(object):
-    def __init__(self, subject=0, x=0, y=0, t=0):
-        self.subject = subject
-        self.x = x
-        self.y = y
-
-    def __str__(self):
-        return "Landmark (subject={}, x={}, y={})".format(self.subject, self.x, self.y)
-
 def particle_step(p, twist, dt):
     # p is a 1x3 array (x, y, theta)
     p[0] = p[0] + cos(p[2]) * twist[0] * dt
