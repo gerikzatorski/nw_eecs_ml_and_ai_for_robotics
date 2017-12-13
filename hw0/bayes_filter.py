@@ -5,15 +5,13 @@ from math import cos, sin, acos, exp, sqrt, atan2, pi
 # Reading Data using config files
 import config
 from data import read_landmark_gt, read_barcodes, read_landmarks, read_codes
+
 file_prefix = "ds{}/ds{}_".format(config.DATA_SET, config.DATA_SET)
 landmarks = read_landmark_gt(file_prefix + 'Landmark_Groundtruth.dat')
 subject_lookup = read_barcodes(file_prefix + 'Barcodes.dat')
 
 M = read_landmarks(file_prefix + 'Landmark_Groundtruth.dat')
 looktable = read_codes(file_prefix + 'Barcodes.dat') # keys are unique id, values are the feature type
-
-def c(feature):
-    return looktable.keys()[looktable.values().index(feature)]
 
 ##################################################
 # Bayes Filter Classes
@@ -28,12 +26,16 @@ class ParticleFilter(object):
         q: particle state vector
         n: number of particles
         particles: a numpy array of all particle states at any given time
-
+        step_noise: noise applied to particles after each step
+        sigmas: additional motion noise std dev
     """
-    def __init__(self, q=[], n=3):
+    def __init__(self, q=[], n=3, step_noise=None, sigmas=None):
         self.q = q
         self.n = n
         self.particles = np.full( (self.n, len(self.q)) , self.q )
+
+        self.step_noise = step_noise
+        self.sigmas = sigmas
         
     def update(self, ut, dt, zt):
         """Step forward with the particle filter algorithm
@@ -47,7 +49,7 @@ class ParticleFilter(object):
             weights = np.full( (self.n,) , 1. / self.n )
             for i in range(self.n):
                 xt = self.particle_preview(self.particles[i], ut, dt)
-                weights[i] = importance_factor(zt, xt)
+                weights[i] = self.importance_factor(zt, xt)
 
             # normalize weights
             weights = np.divide(weights, sum(weights))
@@ -58,11 +60,44 @@ class ParticleFilter(object):
                 for i in range(self.n):
                     psample = self.particle_sample(tmp, weights)
                     self.particles[i] = psample
-                # self.add_noise([0.00001, 0.00001, pi/400])
 
-        # step particles forward
+        # step particles forward and add noise
         for p in self.particles:
             self.particle_step(p, ut, dt)
+        self.add_noise(self.step_noise)
+
+    def importance_factor(self, fz, phat):
+        """Compute the likelihood of a measurement z
+    
+        Args:
+            fz: the measurement
+            phat: a pose
+        Returns:
+            The probability p(f(z) | phat, M )
+        """
+        l = 1.
+        for fi in fz:
+            l = l * self.compute_feature_likelihood(fi, phat)
+        return l
+    
+    def compute_feature_likelihood(self, f, phat):
+        """Computes the likelihood of a single feature f
+    
+        Args:
+            f: the feature
+            phat: a hypothetical pose [x,y,heading]
+    
+        Returns:
+            The probability p(f | phat, M )
+        """
+        landmark = M[c(f[2])]
+    
+        rhat = sqrt(pow(landmark[0] - phat[0], 2) + pow(landmark[1] - phat[1], 2))
+        phihat = atan2(landmark[1] - phat[1], landmark[0] - phat[0]) - phat[2]
+    
+        dr = f[0] - rhat # diff in range
+        dphi = acos(cos(f[1]) * cos(phihat) + sin(f[1]) * sin(phihat)) # diff in bearing
+        return norm_pdf(dr, self.sigmas[0]) * norm_pdf(dphi, self.sigmas[1])
 
     def add_noise(self, sigmas):
         self.particles = np.random.normal(self.particles, sigmas)
@@ -92,14 +127,14 @@ class EKF(object):
     Attributes:
         state: the pose [x, y, theta]
         sigma: sensor sigmas for range, bearing, signature
-        covariance: sigmas for state
+        sigmas: additional motion noise std devs 
+        alphas: additional measurement noise std devs
+        covariance: initial covariance matrix
     """
-    def __init__(self, state=[], e_motion=[], e_measure=[]):
+    def __init__(self, state=[], alphas=[], sigmas=[]):
         self.state = np.array(state)
-        self.e_measure = e_measure
-        self.e_motion = e_motion
-
-        # set initial covariance matrix (guess)
+        self.sigmas = sigmas
+        self.alphas = alphas
         self.covariance = np.array([[0., 0., 0.],
                                     [0., 0., 0.],
                                     [0., 0., 0.]])
@@ -116,15 +151,6 @@ class EKF(object):
         np.array(self.state)
         theta = self.state[2]
 
-        sigmar = self.e_measure[0]
-        sigmaphi = self.e_measure[1]
-        sigmas = self.e_measure[2]
-
-        alpha1 = self.e_motion[0]
-        alpha2 = self.e_motion[1]
-        alpha3 = self.e_motion[2]
-        alpha4 = self.e_motion[3]
-
         vt = ut[0]
         wt = ut[2]
         zero_command = False
@@ -138,22 +164,20 @@ class EKF(object):
         Vt = np.array([[(-np.sin(theta) + np.sin(theta + wt*dt)) / wt,  vt*(np.sin(theta)-np.sin(theta+wt*dt))/pow(wt, 2) + vt*np.cos(theta+wt*dt)*dt/wt],
                        [( np.cos(theta) - np.cos(theta + wt*dt)) / wt, -vt*(np.cos(theta)-np.cos(theta+wt*dt))/pow(wt, 2) + vt*np.sin(theta+wt*dt)*dt/wt],
                        [                         0             ,                           dt            ]])
-        Mt = np.array([[alpha1 * pow(vt, 2) + alpha2 * pow(wt, 2), 0],
-                       [0, alpha3 * pow(vt, 2) + alpha4 * pow(wt, 2)]])
+        Mt = np.array([[self.alphas[0] * pow(vt, 2) + self.alphas[1] * pow(wt, 2), 0],
+                       [0, self.alphas[2] * pow(vt, 2) + self.alphas[3] * pow(wt, 2)]])
 
         mubar = np.add(self.state, np.array([-vt/wt*np.sin(theta) + vt/wt*np.sin(theta+wt*dt),
                                            vt/wt*np.cos(theta) - vt/wt*np.cos(theta+wt*dt),
                                            wt*dt                                   ]))
         epsilonbar = np.add(Gt.dot(self.covariance).dot(Gt.T), Vt.dot(Mt).dot(Vt.T))
-        Qt = np.array([[pow(sigmar, 2), 0, 0],
-                       [0, pow(sigmaphi, 2), 0],
-                       [0, 0, pow(sigmas, 2)]])
 
         # for all observed features...
         pz = 1.
-        dr = 0
-        dphi = 0
         for zi in zt:
+            Qt = np.array([[pow(self.sigmas[0], 2), 0, 0],
+                           [0, pow(self.sigmas[1], 2), 0],
+                           [0, 0, pow(self.sigmas[2], 2)]])
             landmark = M[c(zi[2])]
             mjx = landmark[0]
             mjy = landmark[1]
@@ -172,7 +196,7 @@ class EKF(object):
             mubar = np.add(mubar, Ki.dot(dz))
             epsilonbar = np.dot(np.add(np.identity(len(self.state)), -Ki.dot(Hi)), epsilonbar)
             pz = pz*pow(np.linalg.det(2*pi*Si), -1/2)*np.exp(-1/2*dz.T.dot(np.linalg.pinv(Si)).dot(dz))
-            print "pz = {}".format(pz)
+            # print "pz = {}".format(pz)
         # if zero_command is True:
         self.covariance = epsilonbar
         if zero_command is True or pz < .1:
@@ -184,43 +208,8 @@ class EKF(object):
         return self.state, self.covariance
 
 ##################################################
-# Measurement Model (Likelihood) Functions
+# Helper functions
 ##################################################
-
-def importance_factor(fz, phat):
-    """Compute the likelihood of a measurement z
-
-    Args:
-        fz: the measurement
-        phat: a pose
-    Returns:
-        The probability p(f(z) | phat, M )
-    """
-    l = 1.
-    for fi in fz:
-        l = l * compute_feature_likelihood(fi, phat)
-    return l
-
-def compute_feature_likelihood(f, phat):
-    """Computes the likelihood of a single feature f
-
-    Args:
-        f: the feature
-        phat: a hypothetical pose [x,y,heading]
-
-    Returns:
-        The probability p(f | phat, M )
-    """
-    sigmar = 2
-    sigmaphi = pi / 32
-    landmark = M[c(f[2])]
-
-    rhat = sqrt(pow(landmark[0] - phat[0], 2) + pow(landmark[1] - phat[1], 2))
-    phihat = atan2(landmark[1] - phat[1], landmark[0] - phat[0]) - phat[2]
-
-    dr = f[0] - rhat # diff in range
-    dphi = acos(cos(f[1]) * cos(phihat) + sin(f[1]) * sin(phihat)) # diff in bearing
-    return norm_pdf(dr, sigmar) * norm_pdf(dphi, sigmaphi)
 
 def norm_pdf(v, sigma):
     """The probability density function of a univariate zero-mean normal distribution.
@@ -230,3 +219,7 @@ def norm_pdf(v, sigma):
         sigma: the standard devation sigma > 0.
     """
     return 1 / sqrt(2*pi*pow(sigma, 2)) * exp(-pow(v, 2) / (2*pow(sigma, 2)))
+
+def c(feature):
+    """Correlation function"""
+    return looktable.keys()[looktable.values().index(feature)]

@@ -15,9 +15,7 @@ from tools import particle_step
 NUM_PARTICLES = 20
 PARTICLE_RATE = 300
 
-# PNOISE = [0.002, 0.002, pi/200]
 PNOISE = [0.1, 0.1, pi/16]
-PNOISE_less = [0.002, 0.002, pi/100]
 
 if __name__ == "__main__":
 
@@ -46,32 +44,31 @@ if __name__ == "__main__":
     print "Number of Commands = {}".format(nCommands)
     print "Number of Features = {}".format(nFeatures)
 
-    # initialize some things
-    x0 = gt_data[0][1]
-    y0 = gt_data[0][2]
-    theta0 = gt_data[0][3]
-    
     ##################################################
     # Particle Filter - loops on command events
     ##################################################
 
-    pf = bayes_filter.ParticleFilter(q=[x0, y0, theta0], n=NUM_PARTICLES)
-    pf.add_noise(PNOISE)
+    pose0 = gt_data[0][1:4]
 
-    ekf = bayes_filter.EKF(state=[x0, y0, theta0],
-                           e_motion=[0.07, 0.07, 5*pi, pi/3],
-                           e_measure=[0.005, 0.002, 0.000000001])
-    
-    dead_reckoned = Unicycle(q=[x0, y0, theta0])
-    path_dead_reckoned = [dead_reckoned.get_pose()]
+    dead_reckoned = Unicycle(q=pose0)
+    pf = bayes_filter.ParticleFilter(q=pose0,
+                                     n=NUM_PARTICLES,
+                                     step_noise=[0.002, 0.002, pi/100],
+                                     sigmas=[2.0, pi/32, 0.0])
+    # pf.add_noise(PNOISE)
+
+    ekf = bayes_filter.EKF(state=pose0,
+                           alphas=[0.1, 0.1, 5*pi, pi/3],
+                           sigmas=[0.0721, 0.0494, 0.000000001])
 
     # path histories for graphs
+    path_dead_reckoned = []
     gt_path = []
+    ekf_path = []
+    avg_path = []
     paths = np.zeros( (NUM_PARTICLES,min(args.maxsteps, nCommands)/PARTICLE_RATE+1,3) )
     for i, p in enumerate(pf.particles):
         paths[i,0,:] = p
-    avg_path = [np.average(pf.particles, axis=0)]
-    ekf_path = [ekf.state]
 
     err_fz = [] # real measurements errors
     err_dr = []
@@ -82,7 +79,7 @@ if __name__ == "__main__":
     loopt0 = time.time()
     ipath = 0
     t_prev = 0
-    for ic in range(args.maxsteps):
+    for ic in range(min(args.maxsteps, nCommands-1)):
         
         t_now = odometry_data[ic][0]
         dt = t_now - t_prev
@@ -94,45 +91,42 @@ if __name__ == "__main__":
             f = measurement_data.pop(0)
             fz.append([f[2], f[3], f[1]])
 
-        # Update Bayes filter and dead reckoned
+        # Update Bayes filters and dead reckoned
         pf.update(cmd_now, dt, fz)
         ekf.update(cmd_now, dt, fz)
         dead_reckoned.control_step(dt)
         dead_reckoned.set_command(cmd_now)
 
-        # Calculate path errors
+        # Calculate poses
         pose_gt = gt_interp(t_now)
         pose_dr = dead_reckoned.get_pose()
         pose_pf = np.average(pf.particles, axis=0)
         pose_ekf = ekf.state
 
-        # Update paths every so often
-        if ic % PARTICLE_RATE == 0:
-            for i, p in enumerate(pf.particles):
-                paths[i,ipath,:] = p
-            ipath += 1
+        # Update paths and particles (every so often)
         path_dead_reckoned.append(pose_dr)
         avg_path.append(pose_pf)
         gt_path.append(pose_gt)
         ekf_path.append(pose_ekf)
+        if ic % PARTICLE_RATE == 0:
+            for i, p in enumerate(pf.particles):
+                paths[i,ipath,:] = p
+            ipath += 1
 
         err_dr.append(np.add(pose_gt, -pose_dr))
         err_pf.append(np.add(pose_gt, -pose_pf))
         err_ekf.append(np.add(pose_gt, -pose_ekf))
         
-        for zi in fz:
-            lm = bayes_filter.M[bayes_filter.c(zi[2])]
-            rr = sqrt(pow(pose_gt[0] - lm[0], 2) + pow(pose_gt[1] - lm[1], 2))
-            rphi = atan2(lm[1] - pose_gt[1], lm[0] - pose_gt[0]) - pose_gt[2]
-            mr = f[2]
-            mphi = f[3]
-            dr = rr - mr
-            dphi = rphi - mphi
-            err_fz.append([dr, dphi])
-            # print "Real Measurement Error = {}".format([dr, dphi])
-
-        # Add noise
-        pf.add_noise(PNOISE_less)
+        # for zi in fz:
+        #     lm = bayes_filter.M[bayes_filter.c(zi[2])]
+        #     rr = sqrt(pow(pose_gt[0] - lm[0], 2) + pow(pose_gt[1] - lm[1], 2))
+        #     rphi = atan2(lm[1] - pose_gt[1], lm[0] - pose_gt[0]) - pose_gt[2]
+        #     mr = f[2]
+        #     mphi = f[3]
+        #     dr = rr - mr
+        #     dphi = rphi - mphi
+        #     err_fz.append([dr, dphi])
+        #     # print "Real Measurement Error = {}".format([dr, dphi])
 
         t_prev = t_now
         # end control loop
