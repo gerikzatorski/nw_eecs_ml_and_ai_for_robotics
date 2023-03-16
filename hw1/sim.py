@@ -1,86 +1,182 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+from matplotlib.patches import Rectangle
 
-from graphs import GridGraph
-from planners import BFS, AStar
-from mwr import Unicycle
+from tools import Animator
 
 class Simulation(object):
-    def __init__(self, graph=None, planner=None, robot=None, obstacles=True):
+    """Object used to run simulations with planning algorithms on graph structures
+
+    Atrributes:
+        name: simulation name used to save files
+        graph: node based graph structure
+        planner: planning algorithm
+        robot: kinematic controller
+        dt: time step size
+        fig: matplotlib figure used for visualization
+        ax: matplotlib axes used for visualization
+    """
+    def __init__(self, name='sim', graph=None, planner=None, robot=None, dt=0.1):
         """Init simulation based objects and set start/goal for planner and robot"""
+        self.name = name
         self.graph = graph
         self.planner = planner
-        self.planner.graph = self.graph
+        if self.planner:
+            self.planner.graph = self.graph
         self.robot = robot
+        self.dt = dt
+        
+        self.fig = None
+        self.ax = None
 
     def setup(self, start, goal):
-        self.start = start
-        self.goal = goal
+        """Setup start and goal locations for sim
 
-        self.planner.set_start(self.start)
-        self.planner.set_goal(self.goal)
-        self.robot.set_goal(self.goal)
+        Args:
+            start: start coordinates [x, y]
+            goal: goal coordinates [x, y]
+        """
+        # align start and goal with center of node covering coords
+        self.start = self.graph[start].coord
+        self.goal = self.graph[goal].coord
 
-    def place_obstacles(self, extend=False):
-        """Place obstacles in graph"""
-        for i, o in enumerate(np.loadtxt('ds1/ds1_Landmark_Groundtruth.dat')):
-            self.graph.add_obstacle((o[1], o[2]), extend=extend)
-    
-    def run(self):
-        # run planner
-        path = self.planner.plan()
+        if self.robot:
+            self.robot.place(np.append(self.start, [-np.pi/2]))
 
-        # Setup and run robot
-        # self.robot.drive_basic(path)
-
-    def display(self, dplan=True, drobot=True, real_coords=True, pretty=False, debug=False):
-        fig, ax = plt.subplots()
-        ax.grid()
-
-        xdim = self.graph.celldim[0]
-        ydim = self.graph.celldim[1]
-
-        # ax.set_xlim(self.graph.xlim[0] / xdim, self.graph.xlim[1] / xdim)
-        # ax.set_ylim(self.graph.ylim[1] / ydim, self.graph.ylim[0] / ydim)
+    def place_obstacles(self, extend=None, landmark_file='ds1/ds1_Landmark_Groundtruth.dat'):
+        """Place obstacles in graph
         
-        ## Transform Axis to represent real world coordinates instead of grid coordinates
-        if real_coords:
-            ticks_x = ticker.FuncFormatter(lambda x, pos: '{0:g}'.format( (x + xdim) * xdim + self.graph.xlim[0] - xdim / 2. + xdim / 2. ))
-            ax.xaxis.set_major_formatter(ticks_x)
-            ticks_y = ticker.FuncFormatter(lambda y, pos: '{0:g}'.format( (y + ydim) * ydim + self.graph.ylim[0] - ydim / 2. ))
-            ax.yaxis.set_major_formatter(ticks_y)
-    
-        img = np.zeros( shape=(self.graph.nrow, self.graph.ncol) )
-        for x in range(self.graph.ncol):
-            for y in range(self.graph.nrow):
-                img[y, x] = self.graph.data[self.graph.onedim((x,y))].status
-        ax.imshow(img, cmap='Greys',  interpolation='nearest')
+        Args:
+            extend: how far to extend obstacle (m)
+            landmark_file: landmarks filepath
+        """
+        for i, o in enumerate(np.loadtxt(landmark_file)):
+            self.graph.add_obstacle((o[1], o[2]), extend=extend)
+            
+    def run(self, animation_interval=None):
+        """Run the simulation
 
-        # draw planned path from node paths in planner
-        if dplan:
-            xvals = [self.graph.coord_to_2D(x.position)[0] for x in self.planner.path]
-            yvals = [self.graph.coord_to_2D(x.position)[1] for x in self.planner.path]
-            ax.plot(xvals, yvals, color='y')
-            if not pretty: ax.scatter(xvals, yvals, color='y')
+        Args:
+            animation_interval: image capture rate
+        """
+        if not self.planner or not self.robot:
+            raise Exception('Cannot simulate without planner or motion model')
 
-        # draw robot path
-        if drobot:
-            xvals = [self.graph.coord_to_2D((x[0], x[1]))[0] for x in self.robot.path]
-            yvals = [self.graph.coord_to_2D((x[0], x[1]))[1] for x in self.robot.path]
-            ax.plot(xvals, yvals, color='b')
-            if not pretty: ax.scatter(xvals, yvals, color='b')
+        print('Running Simulation', self.name)
+        
+        self.init_display()
 
-        # draw start and end
-        start = self.graph.coord_to_2D(self.start)
-        goal = self.graph.coord_to_2D(self.goal)
-        ax.scatter(start[0], start[1], color='r')
-        ax.scatter(goal[0], goal[1], color='g')
+        # inactive if interval is None
+        animator = Animator('img', out_name=f'animation_{self.name}',
+                            dt=self.dt, interval=animation_interval)
 
-        # debug: 1D indices to plot
-        if debug == True:
-            for i in range(len(self.graph.data)):
-                px, py = self.graph.twodim(i)
-                ax.text(px, py, str(i))
+        # outer loop terminates when robot reaches goal
+        while not self.close_to(self.goal):
 
+            # online planner replans once it gets close to each target
+            self.planner.set_start(self.robot.pose[:2])
+            self.planner.set_goal(self.goal)
+
+            # extract and target first waypoint of plan
+            path = self.planner.plan()
+            target = np.array(path[1].coord)
+
+            # illustrate new plan and observed obstacles
+            self.draw_plan(segment=True)
+            self.draw_obstacles()
+
+            # inner loop terminates when robot reaches next target
+            while not self.close_to(target):
+                self.draw_robot()
+
+                animator.capture()
+                
+                self.robot.update_control(target)
+                self.robot.control_step(self.dt)
+
+        animator.save_animation()
+        animator.clean()
+        plt.savefig(f'img/img_{self.name}.png')
         plt.show()
+
+    def close_to(self, coord):
+        """Determine if robot is within 1/20 of celldim to given location
+
+        Args:
+            coord: coordinates to check against robot location [x, y]
+        """
+        return (abs(self.robot.pose[0] - coord[0]) < self.graph.celldim[0]/20 and
+                abs(self.robot.pose[1] - coord[1]) < self.graph.celldim[1]/20)
+        
+    def init_display(self):
+        self.fig, self.ax = plt.subplots()
+
+        # local copy for easier reading
+        xlim = self.graph.xlim
+        ylim = self.graph.ylim
+        celldim = self.graph.celldim
+
+        # adjust figure size and aspect ratio
+        self.ax.set_xlim(xlim)
+        self.ax.set_ylim(ylim)
+        self.ax.set_aspect('equal')
+        
+        # draw minor grid ticks - aligned with cells
+        self.ax.set_xticks(np.arange(xlim[0], xlim[1]+celldim[0], celldim[0]), minor=True)
+        self.ax.set_yticks(np.arange(ylim[0], ylim[1]+celldim[1], celldim[1]), minor=True)
+        self.ax.grid(alpha=0.3, which='minor')
+
+        # draw major grid ticks - all integers
+        self.ax.set_xticks(np.arange(xlim[0], xlim[1]+celldim[0], 1), minor=False)
+        self.ax.set_yticks(np.arange(ylim[0], ylim[1]+celldim[1], 1), minor=False)
+        self.ax.grid(alpha=0.7, which='major')
+
+        # draw unobserved obstacles
+        for n in self.graph.nodes:
+            if n.occupied:
+                self.ax.add_patch(Rectangle(xy=n.coord - celldim/2,
+                                            width=celldim[0],
+                                            height=celldim[1],
+                                            facecolor='black'))
+
+        # draw start and goal
+        if self.planner:
+            self.ax.plot(self.start[0], self.start[1],
+                         marker='o',
+                         color='blue')
+            self.ax.plot(self.goal[0], self.goal[1],
+                         marker='o',
+                         color='green')
+
+    def draw_obstacles(self):
+        """ Draw obstacles as rectangles over cells"""
+        for n in self.graph.nodes:
+            if n.cost_observed > 1:
+                self.ax.add_patch(Rectangle(xy=n.coord - self.graph.celldim/2,
+                                            width=self.graph.celldim[0],
+                                            height=self.graph.celldim[1],
+                                            facecolor='red'))
+
+        
+    def draw_plan(self, segment):
+        """Draw the entire path or first segment of the plan"""
+        if self.planner:
+            if segment:
+                xvals = [n.coord[0] for n in self.planner.path[:2]]
+                yvals = [n.coord[1] for n in self.planner.path[:2]]
+            else:
+                xvals = [n.coord[0] for n in self.planner.path]
+                yvals = [n.coord[1] for n in self.planner.path]
+                
+            self.ax.plot(xvals, yvals, color='y')
+
+    def draw_robot(self):
+        """Draw a triangle marker to represent the robot pose"""
+        if self.robot:
+            self.ax.plot(self.robot.pose[0], self.robot.pose[1],
+                         marker=(3, 0, np.degrees(self.robot.pose[2] - np.pi/2)),
+                         markersize=3,
+                         color='black',
+                         # markeredgecolor='black',
+                         # markeredgewidth=0.3,
+                         linestyle ='None')
