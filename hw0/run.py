@@ -64,21 +64,16 @@ if __name__ == "__main__":
     dead_reckoned = Unicycle(state=pose0)
     pf = ParticleFilter(state=pose0,
                         n=100,
-                        step_noise=[0.001, 0.001, np.pi/110],
-                        sigmas=[0.2, 0.01, 0.00])
-                        # step_noise=[0.001, 0.001, np.pi/64],
-                        # sigmas=[0.2, np.pi/32, 0.0])
+                        alphas=[np.pi/4, 0.1, 0.1, np.pi/4],
+                        sigmas=[0.2, np.pi/32, 0])
     ekf = EKF(state=pose0,
               alphas=[0.1, np.pi/16, 0.1, np.pi/16],
               sigmas=[0.4, 0.2, 0.000001],
               outlier_threshold=0.08)
-              # alphas=[3.0, np.pi/12, 3.0, np.pi/12],
-              # sigmas=[0.6, 0.2, 0.000001],
-              # outlier_threshold=0.1)
 
     # Path histories
-    dr_path = []
     gt_path = []
+    dr_path = []
     ekf_path = []
     pf_paths = [[] for i in range(len(pf.particles))]
     pf_avg_path = []
@@ -91,16 +86,28 @@ if __name__ == "__main__":
     
     # Control loop
     loopt0 = time.time()
-    tstart = odometry_data[0][0]
-    for ic in range(num_steps - 1):
-        # Commands applied from tn to tn+1
-        t_now = odometry_data[ic][0]
-        dt = odometry_data[ic+1][0] - odometry_data[ic][0]
-        cmd_now = odometry_data[ic][1:]
-        tvals.append(t_now - tstart)
+    t_start = odometry_data[0][0]
+    for ic in range(1, num_steps):
+        # Update times and commands
+        t = odometry_data[ic][0]
+        dt = odometry_data[ic][0] - odometry_data[ic-1][0]
+        tvals.append(t - t_start)
+        ut = odometry_data[ic][1:]
         
-        # Calculate poses
-        pose_gt = gt_interp(t_now)
+        # Determine features since last loop (measurement)
+        fz = []
+        while len(measurement_data) > 0 and measurement_data[0][0] < t:
+            f = measurement_data.pop(0)
+            fz.append([f[2], f[3], f[1]])
+
+        # Update paths
+        dead_reckoned.set_command(ut)
+        dead_reckoned.control_step(dt)
+        pf.update(ut, dt, fz)
+        ekf.update(ut, dt, fz)
+
+        # Record poses
+        pose_gt = gt_interp(t)
         pose_dr = np.copy(dead_reckoned.state)
         pose_pf = np.average(pf.particles, axis=0)
         pose_ekf = np.copy(ekf.state)
@@ -112,24 +119,13 @@ if __name__ == "__main__":
 
         # Updated paths and particles (every so often)
         dr_path.append(pose_dr)
-        pf_avg_path.append(pose_pf)
         gt_path.append(pose_gt)
-        ekf_path.append(pose_ekf)
+        pf_avg_path.append(pose_pf)
         if ic % PARTICLE_RATE == 0:
             for i, p in enumerate(pf.particles):
-                pf_paths[i].append(p)
+                pf_paths[i].append(np.copy(p))
+        ekf_path.append(pose_ekf)
 
-        # Determine features since last loop (measurement)
-        fz = []
-        while len(measurement_data) > 0 and measurement_data[0][0] < t_now:
-            f = measurement_data.pop(0)
-            fz.append([f[2], f[3], f[1]])
-
-        # Update paths
-        pf.update(cmd_now, dt, fz)
-        ekf.update(cmd_now, dt, fz)
-        dead_reckoned.set_command(cmd_now)
-        dead_reckoned.control_step(dt)
     # End control loop
     
     loopt1 = time.time()

@@ -8,25 +8,70 @@ file_prefix = f'{config.DATASET}/{config.DATASET}_'
 landmarks = read_landmark_gt(file_prefix + 'Landmark_Groundtruth.dat')
 subject_lookup = read_barcodes(file_prefix + 'Barcodes.dat')
 
-##################################################
-# Bayes Filter Classes
-##################################################
-
 class ParticleFilter(object):
     """The basic particle filter, a variant of the Bayes filter based on importance sampling
 
     Attributes:
         n: number of particles
-        particles: a numpy array of all particle states at any given time
-        step_noise: noise applied to particles after each step
-        sigmas: sensor model std devs
+        particles: a numpy array of all particle poses
+        sigmas: sensor model noise parameters
+        alphas: motion model noise parameters
     """
-    def __init__(self, state=[], n=3, step_noise=[], sigmas=[]):
+    def __init__(self, state=[], n=100, alphas=[], sigmas=[]):
         self.n = n
         self.particles = np.full((self.n, len(state)), state)
-
-        self.step_noise = step_noise
         self.sigmas = sigmas
+        self.alphas = alphas
+        
+    def motion_update(self, ut, dt):
+        """Particle motion update
+
+        Table 5.6 in Probabilistic Robotics
+
+        Args:
+            ut: the commanded control
+            dt: the duration to apply the control (s)
+        """
+        for i, p in enumerate(self.particles):
+            dx = ut[0] * dt
+            dy = ut[1] * dt
+            dtheta = ut[2] * dt
+
+            rot1 = atan2(dy, dx)
+            trans = sqrt(pow(dx, 2) + pow(dy, 2))
+            rot2 = dtheta - rot1
+
+            rot1hat = np.random.normal(rot1, sqrt(self.alphas[0]*pow(rot1, 2) +
+                                                  self.alphas[1]*pow(trans, 2)))
+            transhat = np.random.normal(trans, sqrt(self.alphas[2]*pow(trans, 2) +
+                                                    self.alphas[3]*pow(rot1, 2) +
+                                                    self.alphas[3]*pow(rot2, 2)))
+            rot2hat = np.random.normal(rot2, sqrt(self.alphas[0]*pow(rot2, 2) +
+                                                  self.alphas[1]*pow(trans, 2)))
+
+            p[0] += transhat * cos(p[2] + rot1hat)
+            p[1] += transhat * sin(p[2] + rot1hat)
+            p[2] += rot1hat + rot2hat
+
+    def measurement_update(self, zt):
+        """Particle measurement update
+
+        Assumes all measurements taken at same time as control step
+
+        Args:
+            zt: the measurement data as a list of features
+        """
+        if len(zt) > 0:
+            weights = np.full((self.n,), 1/self.n)
+            for i in range(self.n):
+                weights[i] = self.importance_factor(zt, self.particles[i])
+
+            # Normalize weights and resample
+            weights = np.divide(weights, sum(weights))
+            # Copy to prevent sampling from new set
+            tmp = np.copy(self.particles)
+            for i in range(self.n):
+                self.particles[i] = self.particle_sample(tmp, weights)
         
     def update(self, ut, dt, zt):
         """Step forward with the particle filter algorithm
@@ -36,57 +81,44 @@ class ParticleFilter(object):
             dt: the time to apply the control
             zt: the measurement data as a list of features
         """
-        if len(zt) > 0:
-            weights = np.full((self.n,), 1/self.n)
-            for i in range(self.n):
-                xt = self.particle_preview(self.particles[i], ut, dt)
-                weights[i] = self.importance_factor(zt, xt)
+        self.motion_update(ut, dt)
+        self.measurement_update(zt)
 
-            # Normalize weights and resample
-            if weights.sum() != 0:
-                weights = np.divide(weights, sum(weights))
-                # Copy to prevent sampling from new set
-                tmp = np.copy(self.particles)
-                for i in range(self.n):
-                    self.particles[i] = self.particle_sample(tmp, weights)
-            
-        # Step all particles forward and add noise
-        self.particle_step(ut, dt)
-        self.add_noise()
-
-    def importance_factor(self, fz, phat):
+    def importance_factor(self, fz, pose):
         """Compute the likelihood of a measurement
     
         Args:
             fz: the measurement
-            phat: a pose
+            pose: the robot pose
 
         Returns:
-            The probability p(f(z) | phat, M )
+            The probability p( fz | pose, map)
         """
         l = 1.0
         for fi in fz:
-            l = l * self.compute_feature_likelihood(fi, phat)
+            l = l * self.compute_feature_likelihood(fi, pose)
         return l
     
-    def compute_feature_likelihood(self, f, phat):
+    def compute_feature_likelihood(self, f, pose):
         """Computes the likelihood of a single feature f
-    
+
+        Table 6.4 in Probabilistic Robotics
+
         Args:
             f: the feature
-            phat: a hypothetical pose [x,y,heading]
+            pose: the robot pose
     
         Returns:
-            The probability p(f | phat, M )
+            The probability p( f | pose, map )
         """
         landmark = landmarks[subject_lookup[f[2]]]
 
-        dx = landmark[0] - phat[0]
-        dy = landmark[1] - phat[1]
+        dx = landmark[0] - pose[0]
+        dy = landmark[1] - pose[1]
 
         # Expected range and bearing measurements
         rhat = sqrt(pow(dx, 2) + pow(dy, 2))
-        phihat = atan2(dy, dx) - phat[2]
+        phihat = atan2(dy, dx) - pose[2]
 
         # Range and bearing diffs
         dr = f[0] - rhat
@@ -94,41 +126,17 @@ class ParticleFilter(object):
         
         return norm_pdf(dr, self.sigmas[0]) * norm_pdf(dphi, self.sigmas[1])
 
-    def add_noise(self):
-        """Add noise to all particle poses"""
-        self.particles = np.random.normal(self.particles, self.step_noise)
-        
-    def particle_step(self, ut, dt):
-        """Step all particles forward one step
-
-        Args:
-            ut: command velocities
-            dt: amount of time to apply command
-        """
-        for p in self.particles:
-            p[0] += cos(p[2]) * ut[0] * dt
-            p[1] += sin(p[2]) * ut[0] * dt
-            p[2] += ut[2] * dt
-
-    def particle_preview(self, p, ut, dt):
-        """Preview a particle step
-
-        Args:
-            ut: command velocities
-            dt: amount of time to apply command
-        """
-        return [p[0] + cos(p[2]) * ut[0] * dt,
-                p[1] + sin(p[2]) * ut[0] * dt,
-                p[2] + ut[2] * dt]
-
     def particle_sample(self, tmp, weights):
         """Select random particle from tmp
         
         Current implementation faster than np.random.choice(a, p=weights)
 
         Args:
-            tmp: a copy of the particles
-            weights: particle important factors
+            tmp: a copy of the filters particles
+            weights: indexed probabilities for each particle
+
+        Returns:
+            A weighted random sample from the particles
         """
         r = np.random.random_sample() * sum(weights)
         for i, w in enumerate(weights):
@@ -140,12 +148,12 @@ class ParticleFilter(object):
 class EKF(object):
     """The extended Kalman filter localization algorithm.
     
-    Assumes knowledge of exact correspondences.
+    Table 7.2 in Probabilistic Robotics
 
     Attributes:
-        state: the pose [x, y, theta]
-        sigmas: sensor model std devs
-        alphas: motion model noise std devs
+        state: the pose
+        alphas: motion model noise parameters
+        sigmas: sensor model noise parameters
         covariance: a numpy covariance matrix
         outlier_threshold: measurement probability used to reject outliers
     """
@@ -266,4 +274,3 @@ class EKF(object):
             self.state[2] += ut[2] * dt
         else:
             self.state = mu
-        return
