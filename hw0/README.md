@@ -20,10 +20,10 @@ optional arguments:
 
 ### ds0 - no occlusions
 
-![Broken Link Image](hw0/img/paths_ds0.png)
-![Broken Link Image](hw0/img/errors_ds0.png)
+![Broken Link Image](img/paths_ds0.png)
+![Broken Link Image](img/errors_ds0.png)
 
 ### ds1 - occluded landmarks
 
-![Broken Link Image](hw0/img/paths_ds1.png)
-![Broken Link Image](hw0/img/errors_ds1.png)
+![Broken Link Image](img/paths_ds1.png)
+![Broken Link Image](img/errors_ds1.png)
