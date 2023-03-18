@@ -1,89 +1,123 @@
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+from scipy.interpolate import interp1d
 
-from scipy.interpolate import splprep, splev, interp1d
-import scipy.stats
-from math import pi, cos, sin, sqrt, atan2
-
-import data
 import config
-
+from tools import read_odometry, read_measurements, read_gt_path
 from robots import Unicycle
-from tools import particle_step
 
-NUM_PARTICLES = 20
+# Interval at which to capture particles for visualization
 PARTICLE_RATE = 300
-
-PNOISE = [0.1, 0.1, pi/16]
 
 if __name__ == "__main__":
 
-    import argparse
-    parser = argparse.ArgumentParser("Localization Simulation")
-    parser.add_argument('dataset', choices=['ds0','ds1'], default=0)
-    parser.add_argument('maxsteps', type=int, default=100)
-    parser.add_argument('--plot', default=True)
+    # Deterministic runs
+    np.random.seed(0)
+    
+    parser = argparse.ArgumentParser('Localization Simulation')
+    parser.add_argument('dataset',
+                        help='which  dataset to use',
+                        type=str,
+                        choices=['ds0','ds1'])
+    parser.add_argument('maxsteps',
+                        help='maximum number of steps',
+                        type=int,
+                        default=100)
+    parser.add_argument('--plot',
+                        help='plot the results? (default: False)',
+                        action='store_true')
     args = parser.parse_args()
 
-    # ensure correct config values
-    config.DATA_SET = int(args.dataset[2])
-    import bayes_filter 
+    # config is used by other modules
+    config.DATASET = args.dataset
+
+    # Must import here so that config is shared
+    from bayes_filter import ParticleFilter, EKF
 
     # read data
-    file_prefix = "ds{}/ds{}_".format(config.DATA_SET, config.DATA_SET)
-    odometry_data = data.read_odometry(file_prefix + 'Odometry.dat')
-    measurement_data = data.read_features(file_prefix + 'Measurement.dat')
-    t_end = odometry_data[args.maxsteps][0]
+    file_prefix = f'{config.DATASET}/{config.DATASET}_'
+    odometry_data = read_odometry(file_prefix + 'Odometry.dat')
+    measurement_data = read_measurements(file_prefix + 'Measurement.dat')
 
-    gt_data = data.read_gt_path(file_prefix + 'Groundtruth.dat')
+    gt_data = read_gt_path(file_prefix + 'Groundtruth.dat')
     gt_interp = interp1d(gt_data[:,0], gt_data[:,1:], axis=0)
+    
+    num_commands = len(odometry_data)
+    num_features = len(measurement_data)
+    num_steps = min(args.maxsteps, num_commands)
 
-    nCommands = len(odometry_data)
-    nFeatures = len(measurement_data)
-    print "Number of Commands = {}".format(nCommands)
-    print "Number of Features = {}".format(nFeatures)
-
+    print(f'Running {config.DATASET}')
+    print(f'Number of Commands = {num_commands}')
+    print(f'Number of Features = {num_features}')
+    print(f'Number of Steps    = {num_steps}')
+    
     ##################################################
-    # Particle Filter - loops on command events
+    # Bayes Filters - loops on command events
     ##################################################
 
+    # Start with known pose
     pose0 = gt_data[0][1:4]
 
-    dead_reckoned = Unicycle(q=pose0)
-    pf = bayes_filter.ParticleFilter(q=pose0,
-                                     n=NUM_PARTICLES,
-                                     step_noise=[0.002, 0.002, pi/100],
-                                     sigmas=[2.0, pi/32, 0.0])
-    # pf.add_noise(PNOISE)
+    # Setup filters and model
+    dead_reckoned = Unicycle(state=pose0)
+    pf = ParticleFilter(state=pose0,
+                        n=100,
+                        step_noise=[0.001, 0.001, np.pi/110],
+                        sigmas=[0.2, 0.01, 0.00])
+                        # step_noise=[0.001, 0.001, np.pi/64],
+                        # sigmas=[0.2, np.pi/32, 0.0])
+    ekf = EKF(state=pose0,
+              alphas=[0.1, np.pi/16, 0.1, np.pi/16],
+              sigmas=[0.4, 0.2, 0.000001],
+              outlier_threshold=0.08)
+              # alphas=[3.0, np.pi/12, 3.0, np.pi/12],
+              # sigmas=[0.6, 0.2, 0.000001],
+              # outlier_threshold=0.1)
 
-    ekf = bayes_filter.EKF(state=pose0,
-                           alphas=[0.1, 0.1, 5*pi, pi/3],
-                           sigmas=[0.0721, 0.0494, 0.000000001])
-
-    # path histories for graphs
-    path_dead_reckoned = []
+    # Path histories
+    dr_path = []
     gt_path = []
     ekf_path = []
-    avg_path = []
-    paths = np.zeros( (NUM_PARTICLES,min(args.maxsteps, nCommands)/PARTICLE_RATE+1,3) )
-    for i, p in enumerate(pf.particles):
-        paths[i,0,:] = p
+    pf_paths = [[] for i in range(len(pf.particles))]
+    pf_avg_path = []
 
-    err_fz = [] # real measurements errors
+    # Pose error histories
     err_dr = []
     err_pf = []
     err_ekf = []
+    tvals = []
     
-    # control loop
+    # Control loop
     loopt0 = time.time()
-    ipath = 0
-    t_prev = 0
-    for ic in range(min(args.maxsteps, nCommands-1)):
-        
+    tstart = odometry_data[0][0]
+    for ic in range(num_steps - 1):
+        # Commands applied from tn to tn+1
         t_now = odometry_data[ic][0]
-        dt = t_now - t_prev
+        dt = odometry_data[ic+1][0] - odometry_data[ic][0]
         cmd_now = odometry_data[ic][1:]
+        tvals.append(t_now - tstart)
+        
+        # Calculate poses
+        pose_gt = gt_interp(t_now)
+        pose_dr = np.copy(dead_reckoned.state)
+        pose_pf = np.average(pf.particles, axis=0)
+        pose_ekf = np.copy(ekf.state)
+
+        # Calculate errors
+        err_dr.append(np.subtract(pose_gt, pose_dr))
+        err_pf.append(np.subtract(pose_gt, pose_pf))
+        err_ekf.append(np.subtract(pose_gt, pose_ekf))
+
+        # Updated paths and particles (every so often)
+        dr_path.append(pose_dr)
+        pf_avg_path.append(pose_pf)
+        gt_path.append(pose_gt)
+        ekf_path.append(pose_ekf)
+        if ic % PARTICLE_RATE == 0:
+            for i, p in enumerate(pf.particles):
+                pf_paths[i].append(p)
 
         # Determine features since last loop (measurement)
         fz = []
@@ -91,115 +125,80 @@ if __name__ == "__main__":
             f = measurement_data.pop(0)
             fz.append([f[2], f[3], f[1]])
 
-        # Update Bayes filters and dead reckoned
+        # Update paths
         pf.update(cmd_now, dt, fz)
         ekf.update(cmd_now, dt, fz)
-        dead_reckoned.control_step(dt)
         dead_reckoned.set_command(cmd_now)
-
-        # Calculate poses
-        pose_gt = gt_interp(t_now)
-        pose_dr = dead_reckoned.get_pose()
-        pose_pf = np.average(pf.particles, axis=0)
-        pose_ekf = ekf.state
-
-        # Update paths and particles (every so often)
-        path_dead_reckoned.append(pose_dr)
-        avg_path.append(pose_pf)
-        gt_path.append(pose_gt)
-        ekf_path.append(pose_ekf)
-        if ic % PARTICLE_RATE == 0:
-            for i, p in enumerate(pf.particles):
-                paths[i,ipath,:] = p
-            ipath += 1
-
-        err_dr.append(np.add(pose_gt, -pose_dr))
-        err_pf.append(np.add(pose_gt, -pose_pf))
-        err_ekf.append(np.add(pose_gt, -pose_ekf))
-        
-        # for zi in fz:
-        #     lm = bayes_filter.M[bayes_filter.c(zi[2])]
-        #     rr = sqrt(pow(pose_gt[0] - lm[0], 2) + pow(pose_gt[1] - lm[1], 2))
-        #     rphi = atan2(lm[1] - pose_gt[1], lm[0] - pose_gt[0]) - pose_gt[2]
-        #     mr = f[2]
-        #     mphi = f[3]
-        #     dr = rr - mr
-        #     dphi = rphi - mphi
-        #     err_fz.append([dr, dphi])
-        #     # print "Real Measurement Error = {}".format([dr, dphi])
-
-        t_prev = t_now
-        # end control loop
-
+        dead_reckoned.control_step(dt)
+    # End control loop
+    
     loopt1 = time.time()
-    print "Loop Runtime = {}".format(loopt1 - loopt0)
-
+    print(f'Loop Runtime = {loopt1 - loopt0}')
+    
     ##################################################
     # Drawing
     ##################################################
 
-    # if plot
-    print "Plotting ..."
+    if not args.plot:
+        quit()
 
-    fig, ax = plt.subplots(2, figsize=(12, 10))
+    print('Plotting ...')
 
-    # draw intermittent particles
+    fig, ax = plt.subplots(figsize=(12, 10))
+    plt.axis('equal')
+    
+    # Draw intermittent particles
     cmap = plt.cm.cool
-    ncolors = np.linspace(0.0, 1.0, len(paths[0]))
+    ncolors = np.linspace(0.0, 1.0, len(pf_paths[0]))
     colors = [ cmap(x) for x in ncolors ]
     l_arrow = 0.02
-    for i in range(len(paths)):
+    for i in range(len(pf_paths)):
         xvals = []
         yvals = []
-        for j, p in enumerate(paths[i]):
-            xoffset = l_arrow * cos(p[2])
-            yoffset = l_arrow * sin(p[2])
-            ax[0].arrow(p[0]-xoffset, p[1]-yoffset, xoffset*2, yoffset*2,
+        for j, p in enumerate(pf_paths[i]):
+            xoffset = l_arrow * np.cos(p[2])
+            yoffset = l_arrow * np.sin(p[2])
+            ax.arrow(p[0]-xoffset, p[1]-yoffset, xoffset*2, yoffset*2,
                        color=colors[j],
                        alpha=0.8,
                        linewidth=.15,
                        head_width=0.02)
-    
-    # draw avg particle path (not smoothed)
-    xvals = [pose[0] for pose in avg_path]
-    yvals = [pose[1] for pose in avg_path]
-    line_avg, = ax[0].plot(xvals, yvals, color='0.5', label='Particle Avg (discrete)')
+    # Draw all paths
+    line_pf_avg, = ax.plot([pose[0] for pose in pf_avg_path],
+                        [pose[1] for pose in pf_avg_path],
+                        color='0.5', label='Particle Average')
+    line_ekf, = ax.plot([pose[0] for pose in ekf_path],
+                        [pose[1] for pose in ekf_path],
+                        color='y', label='EKF')
+    line_dr, = ax.plot([pose[0] for pose in dr_path],
+                       [pose[1] for pose in dr_path],
+                       color='0.7', linestyle='--', label='Dead Reckoned')
+    line_gt, = ax.plot([pose[0] for pose in gt_path],
+                       [pose[1] for pose in gt_path],
+                       'k', label='Ground Truth')
 
-    # draw smoothed avg particle path
-    # xvals = [pose[0] for pose in avg_path]
-    # yvals = [pose[1] for pose in avg_path]
-    # tck, u = splprep([xvals, yvals], s=0.0)
-    # unew = np.arange(0, 1.01, 0.01)
-    # out = splev(unew, tck)
-    # line_avg_smooth, = ax[0].plot(out[0], out[1], color='0.5', label='Particle Average')
+    ax.legend(handles=[line_pf_avg, line_ekf, line_dr, line_gt])
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    plt.title(f'Localized Paths for {config.DATASET}')
 
-    # draw ekf path
-    xvals = [pose[0] for pose in ekf_path]
-    yvals = [pose[1] for pose in ekf_path]
-    line_ekf, = ax[0].plot(xvals, yvals, color='y', label='EKF')
-    
-    # draw dead reckoned path
-    xvals = [pose[0] for pose in path_dead_reckoned]
-    yvals = [pose[1] for pose in path_dead_reckoned]
-    line_dead_reckoned, = ax[0].plot(xvals, yvals, color='0.7', linestyle='--', label='Dead Reckoned')
+    plt.savefig(f'img/paths_{config.DATASET}.png')
+    plt.show()
 
-    # draw GT path
-    xvals = [pose[0] for pose in gt_path]
-    yvals = [pose[1] for pose in gt_path]
-    line_gt, = ax[0].plot(xvals, yvals, 'k', label='Ground Truth')
-    
-    # ax[0].legend(handles=[line_avg, line_dead_reckoned, line_gt])
+    # Error Plot
+    fig, ax = plt.subplots(figsize=(12, 10))
 
-    # Error Subplot
-    ax[1].plot([sqrt(pow(val[0], 2) + pow(val[1], 2)) for val in err_dr], color='0.7')
-    ax[1].plot([sqrt(pow(val[0], 2) + pow(val[1], 2)) for val in err_pf], 'b-')
-    ax[1].plot([sqrt(pow(val[0], 2) + pow(val[1], 2)) for val in err_ekf], 'y-')
+    line_dr_err, = ax.plot(tvals, [np.sqrt(pow(val[0], 2) + pow(val[1], 2)) for val in err_dr],
+                           color='0.7', linestyle='--', label='Dead Reckoned')
+    line_pf_avg_err, = ax.plot(tvals, [np.sqrt(pow(val[0], 2) + pow(val[1], 2)) for val in err_pf],
+                               color='0.5', label='Particle Average')
+    line_ekf_err, = ax.plot(tvals, [np.sqrt(pow(val[0], 2) + pow(val[1], 2)) for val in err_ekf],
+                            color='y', label='EKF')
 
-    # print scipy.stats.describe(err_fz[0])
-    # print scipy.stats.describe(err_fz[1])
-    # import sys; sys.exit()
+    ax.legend(handles=[line_pf_avg_err, line_ekf_err, line_dr_err])
+    plt.xlabel('Time (s)')
+    plt.ylabel('Error (m)')
+    plt.title(f'Localization Errors for {config.DATASET}')
 
-    # plt.axis('equal')
-    plt.plot()
-    # plt.savefig('img/fig_ds0.png')
+    plt.savefig(f'img/errors_{config.DATASET}.png')
     plt.show()

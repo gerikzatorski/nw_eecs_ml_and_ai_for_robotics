@@ -17,15 +17,14 @@ optional arguments:
 
 Start and goal position are designated with blue and green dots respectively. The robot pose and path is illustrated by the swept black triangle path. Obstacles begin as black rectangles, but upon being observed, change to the color red.
 
-![Broken Link Image](img/img_0.gif)
-![Broken Link Image](img/img_1.gif)
-![Broken Link Image](img/img_2.gif)
-![Broken Link Image](img/img_3.gif)
-![Broken Link Image](img/img_4.gif)
-![Broken Link Image](img/img_5.gif)
+![Broken Link Image](img/img_0.png)
+![Broken Link Image](img/img_1.png)
+![Broken Link Image](img/img_2.png)
+![Broken Link Image](img/img_3.png)
+![Broken Link Image](img/img_4.png)
+![Broken Link Image](img/img_5.png)
 
-
-## Animated Results
+## Animations
 
 ![Broken Link Image](img/animation_0.gif)
 ![Broken Link Image](img/animation_1.gif)
